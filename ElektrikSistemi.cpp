@@ -81,7 +81,7 @@ void RunPointerWatcher() {
     }
 }
 // Loadtest
-
+/**/
 void LoadConfig() {
     const char* path = ".\\scripts\\CustomPerfStrings.ini";
     char sections[4096];
