@@ -80,7 +80,7 @@ void RunPointerWatcher() {
         }
     }
 }
-// LoadConfig fonksiyonu ayný kalacak...
+// Loadtest
 
 void LoadConfig() {
     const char* path = ".\\scripts\\CustomPerfStrings.ini";
