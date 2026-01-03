@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="nfspgp.vcxproj" Id="065111cc-4d82-4277-9423-8686a302347f" />
+</Solution>
