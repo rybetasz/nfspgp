@@ -18,8 +18,7 @@
 #include "detours.h"
 #include <cstring>
 #include "RaceInfo.h"
-#define JSON_HAS_CPP_20 0
-#include "json.hpp"
+#include "WorldObjectCreator.h"
 enum class ERaceType : int
 {
     Speedtrap = 0,
@@ -104,7 +103,6 @@ static const uint32_t kRaceHashes[10] =
     0x00000000, // 10
 };
 
-static void SetNotify(const char* title, const char* msg, LPDIRECT3DTEXTURE9 tex = nullptr);
 static void InitRaceChainIfNeeded();
 static void UpdateRaceChainStates();
 static void DrawRaceChainGridUI();
@@ -159,22 +157,8 @@ static void LoadRaceTypeTexturesIfNeeded()
 
     gRaceTypeTexturesLoaded = true;
 }
-
-extern std::vector<Achievement> myAchievements;
 static char g_CarInput[64] = "";
 
-
-std::vector<Achievement> myAchievements = {
-    {(const char*)u8"MİLYONER", (const char*)u8"Kariyerde 1.000.000$ para kazan.", "GLOBAL\\achievement\\money.png", false, nullptr},
-    {(const char*)u8"HIZ TUTKUNU", (const char*)u8"300 KM/H hızı geçtin.", "GLOBAL\\achievement\\speed.png", false, nullptr},
-    {(const char*)u8"KANUN KAÇAĞI", (const char*)u8"50 polisi pert ettin.", "GLOBAL\\achievement\\cop.png", false, nullptr}
-};
-
-void PlayAchievementSound() {
-    mciSendStringA("close achievement_sound", NULL, 0, NULL);
-    mciSendStringA("open \"GLOBAL\\achievement\\completed.mp3\" type mpegvideo alias achievement_sound", NULL, 0, NULL);
-    mciSendStringA("play achievement_sound", NULL, 0, NULL);
-}
 
 LPDIRECT3DTEXTURE9 millionaireIcon = nullptr;
 LPDIRECT3DTEXTURE9 g_CurrentAchievementTexture = nullptr;
@@ -185,166 +169,131 @@ bool ghost_car = false;
 bool testdialog = false;
 bool g_NotifyShow = false;
 float g_NotifyTimer = 0.0f;
+char g_NotifyAlbum[128] = "";
 char g_NotifyTitle[128] = "";
 char g_NotifyMsg[256] = "";
+bool forcepursuit = false;
+bool forcecheckpoint = false;
 
-static void SetNotify(const char* title, const char* msg, LPDIRECT3DTEXTURE9 tex)
+void SetNotify(
+    const char* title,
+    const char* msg,
+    LPDIRECT3DTEXTURE9 tex
+)
 {
-    if (g_NotifyShow) return;
-    strncpy_s(g_NotifyTitle, title ? title : "", _TRUNCATE);
-    strncpy_s(g_NotifyMsg, msg ? msg : "", _TRUNCATE);
+    strncpy_s(
+        g_NotifyTitle,
+        title ? title : "",
+        _TRUNCATE
+    );
+
+    strncpy_s(
+        g_NotifyMsg,
+        msg ? msg : "",
+        _TRUNCATE
+    );
+
+    // Yeni bildirim geldiğinde animasyonu sıfırla
     g_CurrentAchievementTexture = tex;
     g_NotifyTimer = 0.0f;
     g_NotifyShow = true;
 }
 
-void RenderNotification() {
-    if (!g_NotifyShow) return;
 
-    static int s_lastFrame = -1;
-    int frame = ImGui::GetFrameCount();
-    if (frame == s_lastFrame) return;
-    s_lastFrame = frame;
+void RenderNotification()
+{
+    if (!g_NotifyShow)
+        return;
 
     ImGuiIO& io = ImGui::GetIO();
     g_NotifyTimer += io.DeltaTime;
 
-    float x_pos = -400.0f;
-    float total_time = 4.0f;
-    float anim_speed = 0.6f;
+    const float width = 350.0f;
+    const float height = 100.0f;
+    const float animTime = 0.5f;
+    const float totalTime = 4.5f;
 
-    if (g_NotifyTimer < anim_speed) {
-        float t = g_NotifyTimer / anim_speed;
-        x_pos = -400.0f + (t * 420.0f);
-    }
-    else if (g_NotifyTimer < (total_time - anim_speed)) {
-        x_pos = 20.0f;
-    }
-    else if (g_NotifyTimer < total_time) {
-        float t = (g_NotifyTimer - (total_time - anim_speed)) / anim_speed;
-        x_pos = 20.0f - (t * 420.0f);
-    }
-    else {
+    // Süre dolduysa stilleri push etmeden önce doğrudan kapatıp çık
+    if (g_NotifyTimer >= totalTime)
+    {
         g_NotifyShow = false;
         return;
     }
 
-    ImGui::SetNextWindowPos(ImVec2(x_pos, 50.0f));
-    ImGui::SetNextWindowSize(ImVec2(600, 0));
+    float x = -width;
+    if (g_NotifyTimer < animTime)
+    {
+        float t = g_NotifyTimer / animTime;
+        t = t * t * (3.0f - 2.0f * t);
+        x = -width + (width + 20.0f) * t;
+    }
+    else if (g_NotifyTimer < totalTime - animTime)
+    {
+        x = 20.0f;
+    }
+    else
+    {
+        float t = (g_NotifyTimer - (totalTime - animTime)) / animTime;
+        t = t * t * (3.0f - 2.0f * t);
+        x = 20.0f - (width + 20.0f) * t;
+    }
 
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.94f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.03f, 0.94f, 0.84f, 0.6f));
+    ImGui::SetNextWindowPos(ImVec2(x, 45.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
 
-    ImGui::Begin("##GlobalNotify", nullptr,
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.06f, 0.07f, 0.08f, 0.96f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.03f, 0.94f, 0.84f, 0.7f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+
+    if (ImGui::Begin(
+        "##MusicChyron",
+        nullptr,
         ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoFocusOnAppearing |
-        ImGuiWindowFlags_NoNav);
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoInputs
+    ))
+    {
+        ImVec2 startCursorPos = ImGui::GetCursorPos();
+        ImVec2 screenPos = ImGui::GetCursorScreenPos();
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-    if (g_CurrentAchievementTexture != nullptr) {
-        ImGui::Image((void*)g_CurrentAchievementTexture, ImVec2(55, 55));
-        ImGui::SameLine();
+        float logoSize = 80.0f;
+        float radius = logoSize / 2.0f;
+        ImVec2 center(screenPos.x + radius, screenPos.y + radius);
+
+        float spinSpeed = 4.0f;
+        float angleMin = g_NotifyTimer * spinSpeed;
+        float angleMax = angleMin + (3.14159265f * 1.25f);
+
+        drawList->PathArcTo(center, radius + 4.0f, angleMin, angleMax, 32);
+        drawList->PathStroke(ImGui::GetColorU32(ImVec4(0.03f, 0.94f, 0.84f, 1.0f)), false, 3.0f);
+        drawList->AddCircleFilled(center, radius, IM_COL32(20, 20, 20, 255));
+        ImGui::Dummy(ImVec2(logoSize, logoSize));
+
+        ImGui::SetCursorPos(ImVec2(startCursorPos.x + logoSize + 25.0f, startCursorPos.y + 12.0f));
+        ImGui::BeginGroup();
+
+        ImGui::TextColored(ImVec4(0.03f, 0.94f, 0.84f, 1.0f), "%s", g_NotifyTitle);
+        ImGui::Text("%s", g_NotifyMsg);
+        ImGui::TextColored(ImVec4(0.65f, 0.68f, 0.70f, 1.0f), "%s", g_NotifyAlbum);
+
+        ImGui::EndGroup();
     }
 
-    ImGui::BeginGroup();
-    ImGui::TextColored(ImVec4(0.03f, 0.94f, 0.84f, 1.0f), g_NotifyTitle);
-    ImGui::Separator();
-    ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + 280.0f);
-    ImGui::Text(g_NotifyMsg);
-    ImGui::PopTextWrapPos();
-    ImGui::EndGroup();
-
     ImGui::End();
-
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
 }
 
-void SaveAchievementsSecure() {
-    std::ofstream file("GLOBAL\\stats.dat", std::ios::binary);
-    if (!file.is_open()) return;
-
-    size_t count = myAchievements.size();
-    file.write((char*)&count, sizeof(count));
-
-    for (const auto& ach : myAchievements) {
-        file.write((char*)&ach.unlocked, sizeof(bool));
-    }
-
-    int magicKey = 0xDEADC0DE;
-    file.write((char*)&magicKey, sizeof(magicKey));
-    file.close();
-}
-
-void LoadAchievementsSecure() {
-    std::ifstream file("GLOBAL\\stats.dat", std::ios::binary);
-    if (!file.is_open()) return;
-
-    size_t savedCount;
-    file.read((char*)&savedCount, sizeof(savedCount));
-
-    if (savedCount != myAchievements.size()) {
-        file.close();
-        return;
-    }
-
-    for (auto& ach : myAchievements) {
-        file.read((char*)&ach.unlocked, sizeof(bool));
-    }
-
-    int readKey;
-    file.read((char*)&readKey, sizeof(readKey));
-
-    if (readKey != 0xDEADC0DE) {
-        MessageBoxA(NULL, "Başarım dosyayında değişiklik yapıldığı tespit edildi. Tüm başarımlar sıfırlandı.", "Hata", MB_OK | MB_ICONERROR);
-        for (auto& ach : myAchievements) ach.unlocked = false;
-    }
-
-    file.close();
-}
-
-void TriggerAchievement(int index) {
-    if (index < 0 || (size_t)index >= myAchievements.size()) return;
-    if (g_NotifyShow) return;
-    if (myAchievements[index].unlocked) return;
-
-    myAchievements[index].unlocked = true;
-    SaveAchievementsSecure();
-
-    PlayAchievementSound();
-
-    strncpy_s(g_NotifyTitle, myAchievements[index].name.c_str(), _TRUNCATE);
-    strncpy_s(g_NotifyMsg, myAchievements[index].description.c_str(), _TRUNCATE);
-    g_CurrentAchievementTexture = myAchievements[index].texture;
-
-    g_NotifyTimer = 0.0f;
-    g_NotifyShow = true;
-}
-
-static int lastCash = -1;
-void AchievementUpdate()
-{
-    if (!DALCareer::Game_IsCareerMode())
-        return;
-
-    int cash = 0;
-    if (!DALCareer::GetCash(&cash))
-        return;
-
-    if (cash == lastCash)
-        return;
-
-    lastCash = cash;
-
-    if (cash >= 10000 && !myAchievements[0].unlocked)
-        TriggerAchievement(0);
 
 
-}
 static void InitRaceChainIfNeeded()
 {
     if (!gRaceNodes.empty()) return;
@@ -399,9 +348,6 @@ static void UpdateRaceChainStates()
         gRewardGranted = true;
         RaceTools::WriteStatEncrypted("reward_granted", 0, true, 0);
         NFSC::AchievementCarManager::QueueAddCarByName(gRewardCarName);
-
-        SetNotify("ÖDÜL!", u8"Tüm yarışlar başarıyla tamamlandı!, Araç garajınıza teslim edilecektir.", nullptr);
-        PlayAchievementSound();
     }
 }
 
@@ -418,13 +364,11 @@ static void OnRaceCardClicked(int i0)
 
     if (!n.unlocked)
     {
-        SetNotify(u8"KİLİTLİ", u8"Önce bir önceki yarışı tamamlamanız gerekiyor", nullptr);
         return;
     }
 
     if (n.raceHash == 0)
     {
-        SetNotify("HATA", u8"Bu yarisin hash'i ayarlanmamis!", nullptr);
         return;
     }
 
@@ -437,12 +381,9 @@ static void OnRaceCardClicked(int i0)
         std::snprintf(tag, sizeof(tag), "race_%d_completed", n.index);
         RaceTools::WriteStatEncrypted(tag, n.raceHash, true, flags);
 
-        SetNotify("TAMAMLANDI", u8"Yarış başarıyla tamamlandı", nullptr);
-        PlayAchievementSound();
     }
     else
     {
-        SetNotify(u8"Etkinlik", u8"Seçili yarış başlatılıyor.", nullptr);
         RaceTools::RaceStart(n.raceHash, 7);
     }
     UpdateRaceChainStates();
@@ -512,295 +453,6 @@ static void DrawRaceChainGridUI()
     ImGui::EndChild();
 }
 
-bool g_RestoreMenuVisible = false;
-struct CarForSale
-{
-    std::string presetName;
-    std::string displayName;
-    int price;
-    bool purchased;
-    bool restored;
-    bool caradded;
-    LPDIRECT3DTEXTURE9 texture;
-};
-
-std::string XorEncryptDecrypt(const std::string& data, const std::string& key)
-{
-    std::string result = data;
-    for (size_t i = 0; i < data.size(); i++)
-        result[i] ^= key[i % key.size()];
-    return result;
-}
-
-// Örnek araç listesi
-static std::vector<CarForSale> g_CarsForSale = {
-    { "FALCONXY", "Ford Falcon XY GT-HO Phase II", 50000, false, false, false, nullptr },
-};
-
-static void LoadCarTextures(LPDIRECT3DDEVICE9 pDevice)
-{
-    for (auto& car : g_CarsForSale)
-    {
-        if (!car.texture && !car.presetName.empty()) // presetName boş değilse
-        {
-            // Tam dosya yolunu oluştur
-            std::string path = "GLOBAL\\cars\\" + car.presetName + ".jpg";
-
-            // Texture yükle
-            car.texture = LoadTextureFromFile(pDevice, path.c_str());
-
-            if (!car.texture)
-            {
-                // debug için mesaj
-                char msg[256];
-                snprintf(msg, sizeof(msg), "Failed to load car texture: %s", path.c_str());
-                MessageBoxA(NULL, msg, "Texture Load Error", MB_OK);
-            }
-        }
-    }
-}
-using json = nlohmann::json;
-void SaveCarPurchases()
-{
-    json j;
-
-    for (size_t i = 0; i < g_CarsForSale.size(); i++)
-    {
-        j["cars"][i]["purchased"] = g_CarsForSale[i].purchased;
-        j["cars"][i]["restored"] = g_CarsForSale[i].restored;
-    }
-
-    std::string data = j.dump();
-    std::string encrypted = XorEncryptDecrypt(data, "my_secret_key");
-
-    std::ofstream file("GLOBAL\\cars.json", std::ios::binary);
-    file << encrypted;
-    file.close();
-}
-
-void LoadCarPurchases()
-{
-    std::ifstream file("GLOBAL\\cars.json", std::ios::binary);
-    if (!file.is_open()) return;
-
-    std::string encrypted((std::istreambuf_iterator<char>(file)),
-        std::istreambuf_iterator<char>());
-
-    std::string decrypted = XorEncryptDecrypt(encrypted, "my_secret_key");
-
-    json j = json::parse(decrypted, nullptr, false);
-    if (j.is_discarded()) return;
-
-    for (size_t i = 0; i < g_CarsForSale.size(); i++)
-    {
-        g_CarsForSale[i].purchased = j["cars"][i]["purchased"];
-        g_CarsForSale[i].restored = j["cars"][i]["restored"];
-    }
-}
-
-bool g_ShowCarShop = false;
-void DrawCarShopMenu(LPDIRECT3DDEVICE9 pDevice)
-{
-    if (!g_ShowCarShop) return;
-
-    // Modern stil ayarları
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 12.0f;
-    style.FrameRounding = 6.0f;
-    style.ScrollbarRounding = 8.0f;
-    style.WindowPadding = ImVec2(15, 15);
-
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.12f, 0.12f, 0.14f, 0.95f);
-    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.18f, 0.20f, 1.0f);
-    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.25f, 0.25f, 0.28f, 1.0f);
-    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.20f, 0.20f, 0.23f, 1.0f);
-    style.Colors[ImGuiCol_Button] = ImVec4(0.22f, 0.45f, 0.85f, 1.0f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.55f, 0.95f, 1.0f);
-    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.18f, 0.40f, 0.80f, 1.0f);
-    style.Colors[ImGuiCol_Tab] = ImVec4(0.15f, 0.15f, 0.18f, 1.0f);
-    style.Colors[ImGuiCol_TabHovered] = ImVec4(0.22f, 0.45f, 0.85f, 1.0f);
-    style.Colors[ImGuiCol_TabActive] = ImVec4(0.30f, 0.55f, 0.95f, 1.0f);
-
-    ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->Pos);
-    ImGui::SetNextWindowSize(viewport->Size);
-    ImGui::Begin(u8"Güner Production Restore Garajı##CarShop", nullptr,
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove);
-
-    LoadCarTextures(pDevice);
-
-    int cash = 0;
-    DALCareer::GetCash(&cash);
-
-    ImGui::Text(u8"Menü");
-
-    if (ImGui::BeginTabBar("CarMenuTabs", ImGuiTabBarFlags_FittingPolicyScroll))
-    {
-        // ------------------- SATIN AL -------------------
-        if (ImGui::BeginTabItem(u8"ED'IN HURDALIĞI"))
-        {
-            ImGui::BeginChild("ShopScroll", ImVec2(0, 0), true);
-
-            for (size_t i = 0; i < g_CarsForSale.size(); i++)
-            {
-                auto& car = g_CarsForSale[i];
-                ImGui::PushID((int)i);
-
-                // Araç kartı
-                ImGui::BeginChildFrame(ImGui::GetID(("CarFrame" + std::to_string(i)).c_str()), ImVec2(0, 350), ImGuiWindowFlags_NoScrollbar);
-
-                ImVec2 windowSize = ImGui::GetContentRegionAvail();
-
-                // Resmi ortala
-                if (car.texture)
-                {
-                    ImVec2 texSize(512, 256);
-                    ImVec2 pos = ImVec2((windowSize.x - texSize.x) * 0.5f, 0);
-                    ImGui::SetCursorPos(pos);
-                    ImGui::Image(car.texture, texSize);
-
-
-                    // Resim için border
-                    ImVec2 pMin = ImGui::GetItemRectMin();
-                    ImVec2 pMax = ImGui::GetItemRectMax();
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRect(pMin, pMax, IM_COL32(255, 255, 255, 255), 8.0f, 0, 2.0f);
-                }
-
-                // Araç ismini ortala
-                std::string carName = car.displayName;
-                ImVec2 textSize = ImGui::CalcTextSize(carName.c_str());
-                ImGui::SetCursorPosX((windowSize.x - textSize.x) * 0.5f);
-                ImGui::Text("%s", carName.c_str());
-
-                // Satın Al butonu ortala
-                ImVec2 buttonSize(120, 25);
-                ImGui::SetCursorPosX((windowSize.x - buttonSize.x) * 0.5f);
-
-                if (!car.purchased)
-                {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.6f, 0.2f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.7f, 0.3f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.05f, 0.5f, 0.15f, 1.0f));
-
-                    if (ImGui::Button(u8"Satın Al", buttonSize))
-                    {
-                        if (cash >= car.price)
-                        {
-                            DALCareer::SetCash(cash - car.price);
-                            car.purchased = true;
-                            SaveCarPurchases();
-                        }
-                        else SetNotify(u8"Yetersiz Para", u8"Bu aracı almak için yeterli paranız yok!", nullptr);
-                    }
-
-                    ImGui::PopStyleColor(3);
-                }
-                else
-                {
-                    ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"SATIN ALINDI");
-                }
-
-                ImGui::EndChildFrame();
-                ImGui::PopID();
-            }
-
-            ImGui::EndChild();
-            ImGui::EndTabItem();
-        }
-
-        // ------------------- RESTORE -------------------
-        if (ImGui::BeginTabItem(u8"Güner Production Garajı"))
-        {
-            ImGui::BeginChild("RestoreScroll", ImVec2(0, 0), true);
-
-            for (size_t i = 0; i < g_CarsForSale.size(); i++)
-            {
-                auto& car = g_CarsForSale[i];
-                ImGui::PushID((int)i);
-
-                if (car.purchased)
-                {
-                    int restoreCost = car.price / 4;
-
-                    ImGui::BeginChildFrame(ImGui::GetID(("RestoreFrame" + std::to_string(i)).c_str()), ImVec2(0, 350), ImGuiWindowFlags_NoScrollbar);
-                    ImVec2 windowSize = ImGui::GetContentRegionAvail();
-
-                    // Resmi ortala
-                    if (car.texture)
-                    {
-                        ImVec2 texSize(512, 256);
-                        ImVec2 pos = ImVec2((windowSize.x - texSize.x) * 0.5f, 0);
-                        ImGui::SetCursorPos(pos);
-                        ImGui::Image(car.texture, texSize);
-
-
-                        // Resim için border
-                        ImVec2 pMin = ImGui::GetItemRectMin();
-                        ImVec2 pMax = ImGui::GetItemRectMax();
-                        ImDrawList* drawList = ImGui::GetWindowDrawList();
-                        drawList->AddRect(pMin, pMax, IM_COL32(255, 255, 255, 255), 8.0f, 0, 2.0f);
-                    }
-
-                    // Araç ismini ortala
-					const char* presetxname = car.presetName.c_str();
-                    std::string carName = car.displayName;
-                    ImVec2 textSize = ImGui::CalcTextSize(carName.c_str());
-                    ImGui::SetCursorPosX((windowSize.x - textSize.x) * 0.5f);
-                    ImGui::Text("%s", carName.c_str());
-
-                    // Restore butonu veya tamamlandı yazısı
-                    ImVec2 buttonSize(120, 25);
-                    ImGui::SetCursorPosX((windowSize.x - buttonSize.x) * 0.5f);
-
-                    if (car.restored)
-                    {
-                        ImGui::BeginDisabled();
-                        ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.3f, 1.0f), u8"Bu Aracın Restorasyonu Tamamlandı!");
-                        ImGui::EndDisabled();
-                        if (!car.caradded)
-                        {
-                            NFSC::AchievementCarManager::QueueAddCarByName(car.presetName.c_str());
-                            car.caradded = true; // bir daha eklenmesin
-                        }
-                    }
-                    else
-                    {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.9f, 0.6f, 0.1f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.7f, 0.2f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.8f, 0.5f, 0.05f, 1.0f));
-
-                        if (ImGui::Button("Restore Et", buttonSize))
-                        {
-                            if (cash >= restoreCost)
-                            {
-                                DALCareer::SetCash(cash - restoreCost);
-                                car.restored = true;
-                                SaveCarPurchases();
-                            }
-                            else
-                                SetNotify(u8"Yetersiz Para", u8"Restore için paranız yetersiz!", nullptr);
-                        }
-
-                        ImGui::PopStyleColor(3);
-                    }
-
-                    ImGui::EndChildFrame();
-                }
-
-                ImGui::PopID();
-            }
-
-            ImGui::EndChild();
-            ImGui::EndTabItem();
-        }
-
-        ImGui::EndTabBar();
-    }
-
-    ImGui::End();
-}
-
 void RenderMenu(LPDIRECT3DDEVICE9 pDevice)
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -809,16 +461,8 @@ void RenderMenu(LPDIRECT3DDEVICE9 pDevice)
     if (GetAsyncKeyState(VK_NUMPAD1) & 1)
         show_menu = !show_menu;
 
-    if (GetAsyncKeyState('B') & 1)
-    {
-        cFEng* feng = cFEng::Instance();
-        if (!feng) return;
-        if (!feng->IsPackagePushed("FeCarSelect.fng")) return;
-        g_ShowCarShop = !g_ShowCarShop;
-    }
-
     // Menü veya popup açık mı?
-    bool anyUIOpen = show_menu || g_ShowCarShop;
+    bool anyUIOpen = show_menu;
 
     // ImGui input ayarları
     io.MouseDrawCursor = anyUIOpen;
@@ -831,13 +475,14 @@ void RenderMenu(LPDIRECT3DDEVICE9 pDevice)
     if (show_menu)
     {
         ImGui::SetNextWindowSize(ImVec2(450, 600), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("NFSPGP Paneli", &show_menu))
+        if (ImGui::Begin("NFSPGP Debug Menu", &show_menu))
         {
-            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "NFSPGP Hileler");
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Fonksiyonlar");
             ImGui::Separator();
 
             if (ImGui::Checkbox(u8"Sınırsız NOS", &infinite_nos)) SetInfiniteNos(infinite_nos);
-            if (ImGui::Checkbox("Hayalet Araba", &ghost_car)) SetGhostCar(ghost_car);
+			if (ImGui::Checkbox(u8"Her zaman CheckpointVisible'ı aktif et", &forcecheckpoint)) SetForceCheckpointVisible(forcecheckpoint);
+			if (ImGui::Checkbox(u8"Pursuit Başlat", &forcepursuit)) Game::GameForcePursuitStart(forcepursuit);
 
             static char g_CarInput[64] = "";
             ImGui::InputText("Preset XName", g_CarInput, IM_ARRAYSIZE(g_CarInput));
@@ -845,16 +490,13 @@ void RenderMenu(LPDIRECT3DDEVICE9 pDevice)
             {
                 if (!NFSC::AchievementCarManager::HasCarDB())
                 {
-                    SetNotify(u8"Garaj Verisi Yok!", u8"Aracınızın garaja eklenebilmesi için garaja gidin!", nullptr);
                     return;
                 }
                 if (g_CarInput[0] == '\0')
                 {
-                    SetNotify("HATA", u8"Lütfen bir preset adı girin!", nullptr);
                     return;
                 }
                 NFSC::AchievementCarManager::QueueAddCarByName(g_CarInput);
-                SetNotify("DEBUG", u8"Araç garaja eklendi!", nullptr);
             }
 
             ImGui::Spacing();
@@ -868,48 +510,125 @@ void RenderMenu(LPDIRECT3DDEVICE9 pDevice)
             ImGui::Separator();
             ImGui::Spacing();
 
-            // --- BAŞARIMLAR ---
-            ImGui::TextColored(ImVec4(0.03f, 0.94f, 0.84f, 1.0f), u8"Kariyer Başarımları");
-            ImGui::BeginChild("AchievementScroll", ImVec2(0, 260), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+            ImGui::TextColored(
+                ImVec4(
+                    0.03f,
+                    0.94f,
+                    0.84f,
+                    1.0f
+                ),
+                "WorldModel HOT Test"
+            );
 
-            for (size_t i = 0; i < myAchievements.size(); i++) {
-                ImGui::PushID((int)i);
+            // ============================================================
+            // Model Hash
+            // ============================================================
 
-                if (!myAchievements[i].unlocked)
-                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.4f);
+            static char g_WorldHashInput[32] =
+                "738B1F9B";
 
-                ImGui::BeginGroup();
-                if (myAchievements[i].texture)
-                    ImGui::Image((void*)myAchievements[i].texture, ImVec2(50, 50));
-                else
-                    ImGui::Button("??", ImVec2(50, 50));
+            ImGui::InputText(
+                "Model Hash",
+                g_WorldHashInput,
+                IM_ARRAYSIZE(g_WorldHashInput)
+            );
 
-                ImGui::SameLine();
+            // ============================================================
+            // HOT Index
+            // ============================================================
 
-                ImGui::BeginGroup();
-                ImGui::TextColored(ImVec4(1, 1, 1, 1), myAchievements[i].name.c_str());
+            static int g_HotPositionIndex = 0;
 
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
-                ImGui::TextWrapped(myAchievements[i].description.c_str());
-                ImGui::PopStyleColor();
+            ImGui::InputInt(
+                "HOT Position Index",
+                &g_HotPositionIndex
+            );
 
-                if (myAchievements[i].unlocked)
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"[TAMAMLANDI]");
-                else
-                    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), u8"[KİLİTLİ]");
+            if (g_HotPositionIndex < 0)
+                g_HotPositionIndex = 0;
 
-                ImGui::EndGroup();
-                ImGui::EndGroup();
+            // ============================================================
+            // Rotation
+            // ============================================================
 
-                if (!myAchievements[i].unlocked)
-                    ImGui::PopStyleVar();
+            static float g_WorldRotX = 0.0f;
+            static float g_WorldRotY = 0.0f;
+            static float g_WorldRotZ = 0.0f;
 
-                ImGui::Separator();
-                ImGui::Spacing();
-                ImGui::PopID();
+            ImGui::Text("Rotation (Degrees)");
+
+            ImGui::InputFloat(
+                "Rotation X",
+                &g_WorldRotX,
+                1.0f,
+                10.0f,
+                "%.2f"
+            );
+
+            ImGui::InputFloat(
+                "Rotation Y",
+                &g_WorldRotY,
+                1.0f,
+                10.0f,
+                "%.2f"
+            );
+
+            ImGui::InputFloat(
+                "Rotation Z",
+                &g_WorldRotZ,
+                1.0f,
+                10.0f,
+                "%.2f"
+            );
+
+            // ============================================================
+            // Spawn
+            // ============================================================
+
+            if (ImGui::Button(
+                "WorldModel Spawn",
+                ImVec2(180, 35)))
+            {
+                uint32_t hash =
+                    static_cast<uint32_t>(
+                        strtoul(
+                            g_WorldHashInput,
+                            nullptr,
+                            16
+                        )
+                        );
+
+                SpawnWorldModelFromHotPosition(
+                    hash,
+                    g_HotPositionIndex,
+
+                    g_WorldRotX,
+                    g_WorldRotY,
+                    g_WorldRotZ
+                );
             }
 
-            ImGui::EndChild();
+            // ============================================================
+            // Status
+            // ============================================================
+
+            if (GetTestWorldModel())
+            {
+                ImGui::SameLine();
+
+                ImGui::TextColored(
+                    ImVec4(
+                        0.0f,
+                        1.0f,
+                        0.3f,
+                        1.0f
+                    ),
+                    "Spawned: %p",
+                    GetTestWorldModel()
+                );
+            }
+
+            // --- BAŞARIMLAR --
 
             ImGui::Spacing();
             if (ImGui::Button("Kapat", ImVec2(120, 35)))

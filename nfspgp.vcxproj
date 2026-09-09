@@ -155,10 +155,13 @@
     <ClInclude Include="detours.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="imgui-1.92.5\imgui.h" />
+    <ClInclude Include="PoolTracker.h" />
+    <ClInclude Include="MenuMusic.h" />
     <ClInclude Include="nlohmann\json.hpp" />
     <ClInclude Include="Patches.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="RaceInfo.h" />
+    <ClInclude Include="WorldObjectCreator.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Console.cpp" />
@@ -172,13 +175,15 @@
     <ClCompile Include="imgui-1.92.5\imgui_tables.cpp" />
     <ClCompile Include="imgui-1.92.5\imgui_widgets.cpp" />
     <ClCompile Include="ImGuiStil.cpp" />
+    <ClCompile Include="MenuMusic.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="RaceIconFix.cpp" />
+    <ClCompile Include="PoolTracker.cpp" />
+    <ClCompile Include="WorldObjectCreator.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

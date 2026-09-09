@@ -158,7 +158,6 @@ namespace NFSC
     };
 }
 
-//unsigned int(*bStringHash)(const char* StringToHash) = (unsigned int(*)(const char*))0x471050;
 class cFEng
 {
 public:
@@ -173,3 +172,8 @@ public:
     }
 };
 
+class Game
+{
+public:
+    inline static FUNCTION_PTR(bool, __cdecl, GameForcePursuitStart, 0x006513E0, int enable);
+};

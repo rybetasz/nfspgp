@@ -3,12 +3,10 @@
 #include <vector>
 #include <string>
 void RenderMenu(LPDIRECT3DDEVICE9 pDevice);
-struct Achievement {
-    std::string name;
-    std::string description;
-    const char* iconPath;
-    bool unlocked;
-    LPDIRECT3DTEXTURE9 texture;
-};
 inline HWND window = nullptr;
 inline WNDPROC originalWindowProcess = nullptr;
+void RenderNotification();
+void SetNotify(const char* title, const char* msg, const char* album, LPDIRECT3DTEXTURE9 tex);
+#ifndef IM_PI
+#define IM_PI 3.14159265358979323846f
+#endif

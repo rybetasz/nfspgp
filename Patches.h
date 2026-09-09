@@ -4,7 +4,7 @@
 void LoadConfig();
 void RunPointerWatcher();
 void SetInfiniteNos(bool enable);
-void SetGhostCar(bool enable);
+void SetForceCheckpointVisible(bool enable);
 void SetupImGuiStyle();
 void InitMapIconExtender();
 void InitRaceTypeExtender();
